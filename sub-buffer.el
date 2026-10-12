@@ -64,7 +64,9 @@
                             (if album #'push-button #'sub-buffer-play))
         (unless album
           (evil-local-set-key 'normal (kbd "TAB") #'completion-at-point)
-          (evil-local-set-key 'normal (kbd "K") #'sub-buffer-go-to-album)))
+          (evil-local-set-key 'normal (kbd "K") #'sub-buffer-go-to-album)
+          (evil-local-set-key 'normal (kbd "<") #'sub-buffer-seek-backward)
+          (evil-local-set-key 'normal (kbd ">") #'sub-buffer-seek-forward)))
       (when (and (boundp 'doom-localleader-key)
                  (stringp (symbol-value 'doom-localleader-key))
                  (fboundp 'general-define-key))
@@ -657,6 +659,24 @@ Unlinked characters are fine; joining different entries is ambiguous."
   (setq sub-buffer--paused (not sub-buffer--paused))
   (sub-buffer--refresh))
 
+(defun sub-buffer-seek (seconds)
+  "Seek SECONDS relative to the current playback position."
+  (interactive "nSeek seconds (negative for backward): ")
+  (unless (process-live-p sub-buffer--process) (user-error "Nothing is playing"))
+  (sub-buffer--poll (current-buffer))
+  (unless (process-live-p sub-buffer--ipc) (user-error "Player is still starting; try again"))
+  (sub-buffer--ipc-send (list "seek" seconds "relative+exact")))
+
+(defun sub-buffer-seek-forward ()
+  "Seek ten seconds forward."
+  (interactive)
+  (sub-buffer-seek 10))
+
+(defun sub-buffer-seek-backward ()
+  "Seek ten seconds backward."
+  (interactive)
+  (sub-buffer-seek -10))
+
 (defvar sub-buffer-mode-map (make-sparse-keymap))
 (let ((map sub-buffer-mode-map))
     (define-key map (kbd "TAB") #'completion-at-point)
@@ -667,6 +687,8 @@ Unlinked characters are fine; joining different entries is ambiguous."
     (define-key map (kbd "C-c C-n") #'sub-buffer-next)
     (define-key map (kbd "C-c C-p") #'sub-buffer-pause)
     (define-key map (kbd "C-c C-s") #'sub-buffer-stop)
+    (define-key map (kbd "C-c <left>") #'sub-buffer-seek-backward)
+    (define-key map (kbd "C-c <right>") #'sub-buffer-seek-forward)
     (define-key map (kbd "C-c C-k") #'sub-buffer-remove)
     (define-key map (kbd "C-c C-e") #'sub-buffer-edit)
     (define-key map (kbd "M-<up>") #'sub-buffer-move-up)
@@ -683,6 +705,7 @@ Use M-x sub-buffer-switch-login to choose another auth-source account.
 
 With Evil active, normal-state RET accepts a pending completion and
 plays the entry, TAB completes a query, and K opens the entry's album.
+< and > seek backward and forward by ten seconds.
 In insert state, RET accepts a completion or opens a draft line.
 Evil's usual editing keys apply: dd deletes, yy yanks, p/P paste,
 o/O open draft lines, and u/C-r undo and redo.

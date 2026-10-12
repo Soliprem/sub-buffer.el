@@ -440,8 +440,27 @@
         (should-not (marker-buffer arrow))
         (should-not sub-buffer--indicator)))))
 
+(ert-deftest sub-buffer-seeking ()
+  "Send relative seek commands only when the player connection is ready."
+  (with-temp-buffer
+    (sub-buffer-mode)
+    (let (commands)
+      (cl-letf (((symbol-function 'process-live-p) (lambda (process) (eq process 'live)))
+                ((symbol-function 'sub-buffer--poll) #'ignore)
+                ((symbol-function 'sub-buffer--ipc-send)
+                 (lambda (command) (push command commands))))
+        (should-error (sub-buffer-seek-forward) :type 'user-error)
+        (setq sub-buffer--process 'live)
+        (should-error (sub-buffer-seek-backward) :type 'user-error)
+        (should-not commands)
+        (setq sub-buffer--ipc 'live)
+        (call-interactively (key-binding (kbd "C-c <right>")))
+        (call-interactively (key-binding (kbd "C-c <left>")))
+        (should (equal (nreverse commands)
+                       '(("seek" 10 "relative+exact") ("seek" -10 "relative+exact"))))))))
+
 (ert-deftest sub-buffer-mpv-progress ()
-  "Check actual IPC progress, pause/resume, arrows, and resource cleanup."
+  "Check actual IPC progress, pause/resume, seeking, arrows, and cleanup."
   (skip-unless (and (executable-find "mpv") (memq system-type '(gnu/linux darwin berkeley-unix))))
   (let ((wav (make-temp-file "sub-buffer-test-" nil ".wav"))
         (real-make-process (symbol-function 'make-process)))
@@ -485,6 +504,16 @@
                   (dotimes (_ 15) (accept-process-output nil 0.05))
                   (should sub-buffer--paused)
                   (should (< (abs (- sub-buffer--elapsed paused-time)) 0.05)))
+                (let ((paused-time sub-buffer--elapsed))
+                  (sub-buffer-seek 1)
+                  (dotimes (_ 15) (accept-process-output nil 0.05))
+                  ;; Allow for the null audio driver's buffered position.
+                  (should (< (abs (- sub-buffer--elapsed paused-time 1)) 0.3))
+                  (setq paused-time sub-buffer--elapsed)
+                  (sub-buffer-seek -1)
+                  (dotimes (_ 15) (accept-process-output nil 0.05))
+                  (should (< (abs (- sub-buffer--elapsed paused-time -1)) 0.3))
+                  (should sub-buffer--paused))
                 (sub-buffer-pause)
                 (should-not sub-buffer--paused)
                 (sub-buffer-stop)
@@ -504,6 +533,12 @@
       (evil-local-mode 1)
       (evil-normal-state)
       (should (eq (key-binding (kbd "RET")) #'sub-buffer-play))
+      (should (eq (key-binding (kbd "<")) #'sub-buffer-seek-backward))
+      (should (eq (key-binding (kbd ">")) #'sub-buffer-seek-forward))
+      (evil-insert-state)
+      (should (eq (key-binding (kbd "<")) #'self-insert-command))
+      (should (eq (key-binding (kbd ">")) #'self-insert-command))
+      (evil-normal-state)
       (should (eq (key-binding (kbd "SPC , a")) #'sub-buffer-search))
       (should (eq (key-binding (kbd "SPC , l")) #'sub-buffer-add-playlist)))
     (with-temp-buffer

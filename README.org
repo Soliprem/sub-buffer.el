@@ -55,15 +55,17 @@ Emacs checks the standard authinfo files by default. If you've customized
 
 Open with =M-x sub-buffer=.
 
-| Key     | Action                        |
-|---------+-------------------------------|
-| TAB     | Complete a query              |
-| RET     | Accept or open a draft        |
-| C-c RET | Accept without opening a line |
-| C-c C-c | Play the entry                |
-| C-c C-p | Pause / resume                |
-| C-c C-n | Next track                    |
-| C-c C-s | Stop                          |
+| Key         | Action                        |
+|-------------+-------------------------------|
+| TAB         | Complete a query              |
+| RET         | Accept or open a draft        |
+| C-c RET     | Accept without opening a line |
+| C-c C-c     | Play the entry                |
+| C-c C-p     | Pause / resume                |
+| C-c C-n     | Next track                    |
+| C-c C-s     | Stop                          |
+| C-c <left>  | Seek backward 10 seconds      |
+| C-c <right> | Seek forward 10 seconds       |
 
 See =C-h m= for the remaining commands and Evil behavior, and =C-h b= for
 active bindings, including localleader.
