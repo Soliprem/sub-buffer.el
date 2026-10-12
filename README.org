@@ -10,8 +10,7 @@ For standard Emacs, add to your configuration:
 #+begin_src emacs-lisp
 (add-to-list 'load-path "/path/to/sub-buffer")
 (require 'sub-buffer)
-(setq sub-buffer-server "https://music.example.org"
-      sub-buffer-user "your-username")
+(setq sub-buffer-server "https://music.example.org")
 #+end_src
 
 For Doom, add to =packages.el=:
@@ -27,22 +26,25 @@ And to =config.el=:
 (use-package! sub-buffer
   :commands sub-buffer
   :init
-  (setq sub-buffer-server "https://music.example.org"
-        sub-buffer-user "your-username"))
+  (setq sub-buffer-server "https://music.example.org"))
 #+end_src
 
 Run =doom sync= and restart Emacs. Evil and localleader integration is
 automatic.
 
 Use the server's base URL, including any path prefix, without =/rest=.
-Passwords come from =auth-source= or a prompt. For example, in
+Login and password come from =auth-source=. For example, in
 =~/.authinfo.gpg= (or =~/.authinfo=):
 
 #+begin_example
 machine music.example.org login your-username password your-password
 #+end_example
 
-Match the server's hostname and =sub-buffer-user=.
+Use the hostname or base URL for =machine=. Multiple matching logins prompt
+for a choice; set =sub-buffer-user= to choose one explicitly. A missing
+password prompts for one.
+
+=M-x sub-buffer-switch-login= chooses another account for this session.
 
 Emacs checks the standard authinfo files by default. If you've customized
 =auth-sources=, include the file you use:

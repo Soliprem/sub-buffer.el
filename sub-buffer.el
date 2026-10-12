@@ -6,7 +6,7 @@
 
 ;;; Commentary:
 
-;; Set `sub-buffer-server' and `sub-buffer-user', then run M-x sub-buffer.
+;; Set `sub-buffer-server', then run M-x sub-buffer.
 ;; Type a query on a line and press TAB.  Completed lines are tracks;
 ;; ordinary kill/yank and undo edit the queue.  mpv handles playback.
 
@@ -33,7 +33,7 @@
   :type '(choice (const nil) string))
 
 (defcustom sub-buffer-user nil
-  "Subsonic username.  Passwords come from auth-source or a prompt."
+  "Subsonic username, or nil to choose a login from auth-source."
   :type '(choice (const nil) string))
 
 (defvar sub-buffer--credentials nil "Cached (SERVER USER PASSWORD).")
@@ -88,28 +88,39 @@
 
 (defun sub-buffer--url (endpoint &optional parameters)
   "Build an authenticated URL for ENDPOINT with PARAMETERS."
-  (unless (and (stringp sub-buffer-server) (stringp sub-buffer-user)
-               (not (string-empty-p sub-buffer-user)))
-    (user-error "Set sub-buffer-server and sub-buffer-user first"))
+  (unless (stringp sub-buffer-server)
+    (user-error "Set sub-buffer-server first"))
   (let* ((server (url-generic-parse-url sub-buffer-server))
          (host (url-host server)))
     (unless (and (member (url-type server) '("http" "https")) host
                  (not (url-user server)) (not (url-target server))
                  (not (string-match-p "[?]" (url-filename server))))
       (user-error "Use an HTTP(S) base URL without credentials or a query"))
-    (unless (equal (list sub-buffer-server sub-buffer-user)
-                   (butlast sub-buffer--credentials))
-      (let* ((auth (car (auth-source-search :host host :user sub-buffer-user
-                                           :require '(:secret) :max 1)))
+    (unless (and (equal sub-buffer-server (car sub-buffer--credentials))
+                 (or (null sub-buffer-user)
+                     (equal sub-buffer-user (cadr sub-buffer--credentials))))
+      (let* ((matches (auth-source-search
+                       :host (list host (string-trim-right sub-buffer-server "/+"))
+                       :user (or sub-buffer-user t)
+                       :require '(:user :secret)
+                       :max (if sub-buffer-user 1 most-positive-fixnum)))
+             (users (delete-dups (mapcar (lambda (entry) (plist-get entry :user)) matches)))
+             (user (or sub-buffer-user
+                       (if (cdr users) (completing-read "Subsonic login: " users nil t)
+                         (car users))))
+             (auth (cl-find user matches :test #'equal
+                            :key (lambda (entry) (plist-get entry :user))))
              (secret (plist-get auth :secret)))
+        (unless (and (stringp user) (not (string-empty-p user)))
+          (user-error "Set sub-buffer-user or add a matching authinfo login"))
         (setq sub-buffer--credentials
-              (list sub-buffer-server sub-buffer-user
+              (list sub-buffer-server user
                     (or (if (functionp secret) (funcall secret) secret)
                         (read-passwd "Subsonic password: "))))))
     (let* ((salt (md5 (format "%s:%s:%s" (current-time) (random) (emacs-pid))))
            (token (md5 (encode-coding-string
                         (concat (nth 2 sub-buffer--credentials) salt) 'utf-8)))
-           (params (append `(("u" . ,sub-buffer-user) ("t" . ,token)
+           (params (append `(("u" . ,(cadr sub-buffer--credentials)) ("t" . ,token)
                              ("s" . ,salt) ("v" . "1.16.1")
                              ("c" . "sub-buffer") ("f" . "json"))
                            parameters)))
@@ -119,6 +130,18 @@
                       (concat (url-hexify-string (car pair)) "="
                               (url-hexify-string (cdr pair))))
                     params "&")))))
+
+;;;###autoload
+(defun sub-buffer-switch-login ()
+  "Choose a login for subsequent requests to `sub-buffer-server'.
+Override `sub-buffer-user' for this session.  Canceling keeps the current login."
+  (interactive)
+  (let ((credentials (let ((sub-buffer-user nil) (sub-buffer--credentials nil))
+                       (sub-buffer--url "ping")
+                       sub-buffer--credentials)))
+    (setq sub-buffer-user (cadr credentials)
+          sub-buffer--credentials credentials)
+    (message "Sub-buffer login: %s" sub-buffer-user)))
 
 (defun sub-buffer--request (endpoint parameters)
   "Return the Subsonic response for ENDPOINT and PARAMETERS."
@@ -655,6 +678,8 @@ Unlinked characters are fine; joining different entries is ambiguous."
 
 (define-derived-mode sub-buffer-mode fundamental-mode "sub-buffer"
   "Edit a music queue.  Type a query and press TAB to insert a track.
+
+Use M-x sub-buffer-switch-login to choose another auth-source account.
 
 With Evil active, normal-state RET accepts a pending completion and
 plays the entry, TAB completes a query, and K opens the entry's album.
