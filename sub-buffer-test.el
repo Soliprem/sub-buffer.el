@@ -440,6 +440,38 @@
         (should-not (marker-buffer arrow))
         (should-not sub-buffer--indicator)))))
 
+(ert-deftest sub-buffer-previous-track ()
+  "Find the previous track through drafts, moves, and deletion of playback."
+  (with-temp-buffer
+    (sub-buffer-mode)
+    (insert "draft\n")
+    (sub-buffer--insert "First" '((id . "one")))
+    (insert "\ndraft\n")
+    (sub-buffer--insert "Second" '((id . "two")))
+    (insert "\n")
+    (let ((second (save-excursion (forward-line -1) (sub-buffer--entry))))
+      (cl-letf (((symbol-function 'sub-buffer-play)
+                 (lambda ()
+                   (setq sub-buffer--current (sub-buffer--entry)
+                         sub-buffer--position (copy-marker (line-beginning-position) t)))))
+        (sub-buffer-previous)
+        (should (eq sub-buffer--current second))
+        (should (eobp))
+        (sub-buffer-previous)
+        (should (equal (alist-get 'id (cdr sub-buffer--current)) "one"))
+        (should-error (sub-buffer-previous) :type 'user-error)
+        ;; Moving the playing entry changes its predecessor.
+        (goto-char (sub-buffer--current-line))
+        (sub-buffer-move-down)
+        (sub-buffer-move-down)
+        (sub-buffer-previous)
+        (should (eq sub-buffer--current second))
+        ;; Deleting it leaves the playback marker at the next remaining line.
+        (goto-char (sub-buffer--current-line))
+        (sub-buffer-remove)
+        (should-error (sub-buffer-previous) :type 'user-error)
+        (should (eq sub-buffer--current second))))))
+
 (ert-deftest sub-buffer-seeking ()
   "Send relative seek commands only when the player connection is ready."
   (with-temp-buffer
@@ -540,6 +572,9 @@
       (should (eq (key-binding (kbd ">")) #'self-insert-command))
       (evil-normal-state)
       (should (eq (key-binding (kbd "SPC , a")) #'sub-buffer-search))
+      (should (eq (key-binding (kbd "SPC , p")) #'sub-buffer-previous))
+      (should (eq (key-binding (kbd "SPC , n")) #'sub-buffer-next))
+      (should (eq (key-binding (kbd "SPC , SPC")) #'sub-buffer-pause))
       (should (eq (key-binding (kbd "SPC , l")) #'sub-buffer-add-playlist)))
     (with-temp-buffer
       (sub-buffer-album-mode)

@@ -78,7 +78,7 @@
                                       (symbol-value 'doom-localleader-alt-key)
                                     (symbol-value 'doom-localleader-key))
                (if album (list "a" #'sub-buffer-album-add)
-                 (list "a" #'sub-buffer-search "p" #'sub-buffer-play
+                 (list "a" #'sub-buffer-search "p" #'sub-buffer-previous
                        "SPC" #'sub-buffer-pause "n" #'sub-buffer-next "s" #'sub-buffer-stop
                        "RET" #'sub-buffer-newline "d" #'sub-buffer-remove "e" #'sub-buffer-edit
                        "k" #'sub-buffer-move-up "j" #'sub-buffer-move-down
@@ -648,6 +648,17 @@ Unlinked characters are fine; joining different entries is ambiguous."
     (if (and (not (eobp)) (sub-buffer--entry))
         (sub-buffer-play)
       (sub-buffer-stop))))
+
+(defun sub-buffer-previous ()
+  "Play the previous completed line, following the buffer's current order."
+  (interactive)
+  (save-excursion
+    (when sub-buffer--current
+      (goto-char (or (sub-buffer--current-line) sub-buffer--position)))
+    (unless (zerop (forward-line -1)) (user-error "No previous track"))
+    (while (and (not (bobp)) (not (sub-buffer--entry))) (forward-line -1))
+    (unless (sub-buffer--entry) (user-error "No previous track"))
+    (sub-buffer-play)))
 
 (defun sub-buffer-pause ()
   "Toggle mpv's pause state."
