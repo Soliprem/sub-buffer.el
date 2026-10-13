@@ -61,7 +61,8 @@ Open with =M-x sub-buffer=.
 | RET         | Accept or open a draft        |
 | C-c RET     | Accept without opening a line |
 | C-c C-c     | Play the entry                |
-| C-c C-p     | Pause / resume                |
+| C-c C-p     | Previous track                |
+| C-c SPC     | Pause / resume                |
 | C-c C-n     | Next track                    |
 | C-c C-s     | Stop                          |
 | C-c <left>  | Seek backward 10 seconds      |
