@@ -127,6 +127,28 @@
               (should (= (length candidates) 3))
               (should (cl-every #'stringp candidates)))))))))
 
+(ert-deftest sub-buffer-completion-scrolling ()
+  "Restore scrolling after completion, even when it ends in another buffer."
+  (dolist (scroll '(t nil current-line))
+    (dolist (elsewhere '(nil t))
+      (let ((sub-buffer--hscroll-state nil)
+            (completion-in-region-mode-predicate #'always))
+        (with-temp-buffer
+          (sub-buffer-mode)
+          (setq-local auto-hscroll-mode scroll)
+          (unwind-protect
+              (progn
+                (completion-in-region-mode 1)
+                (should-not auto-hscroll-mode)
+                ;; Re-enabling completion must not overwrite the saved setting.
+                (completion-in-region-mode 1)
+                (if elsewhere
+                    (with-temp-buffer (completion-in-region-mode -1))
+                  (completion-in-region-mode -1))
+                (should (eq auto-hscroll-mode scroll))
+                (should-not sub-buffer--hscroll-state))
+            (completion-in-region-mode -1)))))))
+
 (ert-deftest sub-buffer-completion-and-references ()
   "Distinguish preview from acceptance and retain links through text edits."
   (let* ((song '((id . "one") (title . "First")))

@@ -53,6 +53,7 @@
 (defvar-local sub-buffer--album-songs nil)
 (defvar-local sub-buffer--queue nil)
 (defvar-local sub-buffer--completion nil)
+(defvar sub-buffer--hscroll-state nil)
 
 (defun sub-buffer--setup-keybindings ()
   "Use Evil and localleader when they are available in a queue buffer."
@@ -388,6 +389,25 @@ Unlinked characters are fine; joining different entries is ambiguous."
     (dolist (candidate (sub-buffer--candidates songs))
       (sub-buffer--insert (car candidate) (cdr candidate))
       (sub-buffer-newline))))
+
+(defun sub-buffer--completion-hscroll ()
+  "Suspend automatic horizontal scrolling until completion ends.
+Necessary for corfu-like completors, which break with auto hscroll"
+  ;; Completion mode is global and can end from a different buffer.
+  (cond
+   ((and completion-in-region-mode (derived-mode-p 'sub-buffer-mode)
+         (not sub-buffer--hscroll-state))
+    (setq sub-buffer--hscroll-state (cons (current-buffer) auto-hscroll-mode))
+    (setq-local auto-hscroll-mode nil))
+   ((and (not completion-in-region-mode) sub-buffer--hscroll-state)
+    (let ((buffer (car sub-buffer--hscroll-state))
+          (scroll (cdr sub-buffer--hscroll-state)))
+      (setq sub-buffer--hscroll-state nil)
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (setq-local auto-hscroll-mode scroll)))))))
+
+(add-hook 'completion-in-region-mode-hook #'sub-buffer--completion-hscroll)
 
 (defun sub-buffer--completion-at-point ()
   "Complete a draft line against Subsonic."
