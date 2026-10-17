@@ -51,7 +51,7 @@
 Set this before opening a queue.  Org is loaded only when enabled."
   :type 'boolean)
 
-(defcustom sub-buffer-playlist-directory "~/org/playlists/"
+(defcustom sub-buffer-playlist-directory (file-name-concat org-directory "playlists/")
   "Directory for local Org playlists.
 Use `sub-buffer-open-playlist' to open or create one."
   :type 'directory)
