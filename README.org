@@ -71,6 +71,19 @@ Open with =M-x sub-buffer=.
 See =C-h m= for the remaining commands and Evil behavior, and =C-h b= for
 active bindings, including localleader.
 
-This is a prototype: search is synchronous, and there's no saved queue or
-scrobbling. Track references are text properties; saving as plain text loses
-them.
+To use Org for saved playlists:
+
+#+begin_src emacs-lisp
+(setq sub-buffer-use-org t
+      sub-buffer-playlist-directory "~/org/playlists/")
+#+end_src
+
+=M-x sub-buffer-open-playlist= opens or creates a playlist in that directory.
+Org files there open as playable queues. =M-x sub-buffer= also uses Org;
+save its buffer there to keep the playlist.
+
+Track IDs live in Org links, one per line. The file records its Subsonic
+server; playback checks that it matches =sub-buffer-server=.
+
+This is a prototype: search is synchronous, and there's no scrobbling.
+Without Org support, saving the queue as plain text loses track references.
