@@ -79,9 +79,11 @@ active bindings, including localleader.
 To use Org for saved playlists:
 
 #+begin_src emacs-lisp
-(setq sub-buffer-use-org t
-      sub-buffer-playlist-directory "~/org/playlists/")
+(setq sub-buffer-use-org t)
 #+end_src
+
+Playlists default to the =playlists/= subdirectory of =org-directory=.
+Set =sub-buffer-playlist-directory= to use another directory.
 
 =M-x sub-buffer-open-playlist= opens or creates a playlist in that directory.
 Org files there open as playable queues. =M-x sub-buffer= also uses Org;

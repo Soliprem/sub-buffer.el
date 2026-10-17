@@ -131,9 +131,9 @@ a track link, and M-up/M-down reorder Org items.
     (insert "\n"))
   (sub-buffer--setup-queue)
   (unless buffer-file-name
-    (make-directory sub-buffer-playlist-directory t)
-    (setq-local default-directory (file-name-as-directory
-                                  (expand-file-name sub-buffer-playlist-directory))))
+    (let ((directory (sub-buffer--playlist-directory)))
+      (make-directory directory t)
+      (setq-local default-directory (file-name-as-directory directory))))
   (sub-buffer--setup-keybindings))
 
 (org-link-set-parameters "sub-buffer" :follow #'sub-buffer-org--follow)

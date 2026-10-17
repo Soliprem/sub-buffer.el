@@ -23,6 +23,7 @@
 
 (defvar url-http-response-status)
 (defvar url-http-end-of-headers)
+(defvar org-directory)
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function general-define-key "general" (&rest args))
 (declare-function org-at-item-p "org-list" ())
@@ -51,10 +52,19 @@
 Set this before opening a queue.  Org is loaded only when enabled."
   :type 'boolean)
 
-(defcustom sub-buffer-playlist-directory (file-name-concat org-directory "playlists/")
+(defcustom sub-buffer-playlist-directory nil
   "Directory for local Org playlists.
+When nil, use the playlists subdirectory of `org-directory'.
 Use `sub-buffer-open-playlist' to open or create one."
-  :type 'directory)
+  :type '(choice (const :tag "Under org-directory" nil) directory))
+
+(defun sub-buffer--playlist-directory ()
+  "Return the playlist directory, loading Org to resolve its default."
+  (expand-file-name
+   (or sub-buffer-playlist-directory
+       (progn
+         (require 'org)
+         (file-name-concat org-directory "playlists/")))))
 
 (defvar sub-buffer--credentials nil "Cached (SERVER USER PASSWORD).")
 (defvar-local sub-buffer--process nil)
@@ -866,11 +876,11 @@ Default to the playing queue, or the most recently visited queue."
 ;;;###autoload
 (defun sub-buffer-open-playlist (file)
   "Open or create FILE as an Org queue in `sub-buffer-playlist-directory'."
-  (interactive (list (read-file-name "Playlist: " sub-buffer-playlist-directory
+  (interactive (list (read-file-name "Playlist: " (sub-buffer--playlist-directory)
                                      nil nil "playlist.org")))
   (unless sub-buffer-use-org (user-error "Enable sub-buffer-use-org first"))
   (require 'sub-buffer-org)
-  (setq file (expand-file-name file sub-buffer-playlist-directory))
+  (setq file (expand-file-name file (sub-buffer--playlist-directory)))
   (unless (string-suffix-p ".org" file) (setq file (concat file ".org")))
   (make-directory (file-name-directory file) t)
   (find-file file)
@@ -880,7 +890,7 @@ Default to the playing queue, or the most recently visited queue."
   "Recognize Org playlists in the configured directory."
   (and sub-buffer-use-org buffer-file-name
        (string-suffix-p ".org" buffer-file-name)
-       (file-in-directory-p buffer-file-name sub-buffer-playlist-directory)))
+       (file-in-directory-p buffer-file-name (sub-buffer--playlist-directory))))
 
 (autoload 'sub-buffer-org-mode "sub-buffer-org" nil t)
 (add-to-list 'magic-mode-alist '(sub-buffer--playlist-p . sub-buffer-org-mode))
