@@ -596,6 +596,7 @@
       (should (eq (key-binding (kbd "SPC , a")) #'sub-buffer-search))
       (should (eq (key-binding (kbd "SPC , p")) #'sub-buffer-previous))
       (should (eq (key-binding (kbd "SPC , n")) #'sub-buffer-next))
+      (should (eq (key-binding (kbd "SPC , N")) #'sub-buffer-new))
       (should (eq (key-binding (kbd "SPC , SPC")) #'sub-buffer-pause))
       (should (eq (key-binding (kbd "SPC , l")) #'sub-buffer-add-playlist)))
     (with-temp-buffer
@@ -679,6 +680,44 @@
           (insert "replacement query")
           (evil-normal-state)
           (should (equal (ids) '("three"))))))))
+
+(ert-deftest sub-buffer-new-queue ()
+  "Create distinct unsaved queues in either mode and retain existing state."
+  (let* ((directory (make-temp-file "sub-buffer-new-" t))
+         (sub-buffer-playlist-directory directory)
+         (entry '("Playing" (id . "one")))
+         queues)
+    (unwind-protect
+        (save-window-excursion
+          (dolist (sub-buffer-use-org '(nil t))
+            (let ((window (selected-window))
+                  (windows (window-list))
+                  (display-buffer-alist '(("\\*sub-buffer\\*" (display-buffer-pop-up-window)))))
+              (sub-buffer-new)
+              (push (current-buffer) queues)
+              (should (eq (selected-window) window))
+              (should (equal (window-list) windows)))
+            (insert "draft")
+            (setq sub-buffer--current entry)
+            (let ((previous (current-buffer)))
+              (sub-buffer-new)
+              (push (current-buffer) queues)
+              (should-not (eq (current-buffer) previous))
+              (should-not buffer-file-name)
+              (should (eq major-mode (if sub-buffer-use-org
+                                        'sub-buffer-org-mode 'sub-buffer-mode)))
+              (should (eq (buffer-local-value 'sub-buffer--current previous) entry))
+              (should (with-current-buffer previous
+                        (string-suffix-p "draft" (buffer-string)))))
+            (let ((newest (current-buffer)))
+              (switch-to-buffer (get-buffer-create "*scratch*"))
+              (sub-buffer)
+              (should (eq (current-buffer) newest)))))
+      (dolist (queue queues)
+        (when (buffer-live-p queue)
+          (with-current-buffer queue (set-buffer-modified-p nil))
+          (kill-buffer queue)))
+      (delete-directory directory t))))
 
 (ert-deftest sub-buffer-return-to-queue ()
   "Return to renamed and recently visited queues without resetting them."

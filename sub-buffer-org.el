@@ -120,6 +120,7 @@ When RECORD is non-nil, record the configured server if the header is missing."
   "Edit and play a persistent Org playlist.
 Search and playback use the usual sub-buffer bindings.  Track links hold
 IDs in plain text; saving and reopening the file preserves the queue.
+Use M-x sub-buffer-new for a fresh unsaved queue.
 Org headings, notes and list formatting remain editable.  C-c C-o plays
 a track link, and M-up/M-down reorder Org items.
 

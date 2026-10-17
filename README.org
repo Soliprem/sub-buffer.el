@@ -53,7 +53,7 @@ Emacs checks the standard authinfo files by default. If you've customized
 (add-to-list 'auth-sources "~/.authinfo.gpg")
 #+end_src
 
-Open with =M-x sub-buffer=.
+Open with =M-x sub-buffer=. Use =M-x sub-buffer-new= for a fresh queue.
 
 | Key         | Action                        |
 |-------------+-------------------------------|

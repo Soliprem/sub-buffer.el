@@ -106,7 +106,7 @@ Use `sub-buffer-open-playlist' to open or create one."
                        "RET" #'sub-buffer-newline "d" #'sub-buffer-remove "e" #'sub-buffer-edit
                        "k" #'sub-buffer-move-up "j" #'sub-buffer-move-down
                        "o" #'sub-buffer-go-to-album "b" #'sub-buffer-add-album
-                       "l" #'sub-buffer-add-playlist)))))))
+                       "l" #'sub-buffer-add-playlist "N" #'sub-buffer-new)))))))
 
 (with-eval-after-load 'evil
   (add-hook 'evil-local-mode-hook #'sub-buffer--setup-keybindings))
@@ -781,6 +781,7 @@ Necessary for corfu-like completors, which break with auto hscroll"
   "Edit a music queue.  Type a query and press TAB to insert a track.
 
 Use M-x sub-buffer-switch-login to choose another auth-source account.
+Use M-x sub-buffer-new for a fresh unsaved queue.
 
 With Evil active, normal-state RET accepts a pending completion and
 plays the entry, TAB completes a query, and K opens the entry's album.
@@ -823,11 +824,15 @@ is available.  Use C-h b to list active state and localleader bindings.
                   (with-current-buffer buffer
                     (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)))
                 (buffer-list))))
-    (pop-to-buffer (or queue (get-buffer-create "*sub-buffer*")))
-    (unless queue
-      (if sub-buffer-use-org
-          (progn (require 'sub-buffer-org) (sub-buffer-org-mode))
-        (sub-buffer-mode)))))
+    (if queue (pop-to-buffer queue) (sub-buffer-new))))
+
+;;;###autoload
+(defun sub-buffer-new ()
+  "Show a fresh unsaved queue in the current window, preserving other queues."
+  (interactive)
+  (when sub-buffer-use-org (require 'sub-buffer-org))
+  (switch-to-buffer (generate-new-buffer "*sub-buffer*"))
+  (if sub-buffer-use-org (sub-buffer-org-mode) (sub-buffer-mode)))
 
 ;;;###autoload
 (defun sub-buffer-open-playlist (file)
