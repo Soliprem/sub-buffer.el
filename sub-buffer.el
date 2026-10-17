@@ -25,6 +25,9 @@
 (defvar url-http-end-of-headers)
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function general-define-key "general" (&rest args))
+(declare-function org-at-item-p "org-list" ())
+(declare-function org-at-item-checkbox-p "org-list" ())
+(declare-function org-insert-item "org-list" (&optional checkbox))
 (declare-function sub-buffer-org-mode "sub-buffer-org" ())
 (declare-function sub-buffer-org-tab "sub-buffer-org" ())
 (declare-function sub-buffer-org--entry "sub-buffer-org" ())
@@ -813,14 +816,18 @@ is available.  Use C-h b to list active state and localleader bindings.
 
 ;;;###autoload
 (defun sub-buffer ()
-  "Open the editable Subsonic queue."
+  "Return to the most recently used queue, or open one if none exists."
   (interactive)
-  (pop-to-buffer (get-buffer-create "*sub-buffer*"))
-  (if sub-buffer-use-org
-      (progn
-        (require 'sub-buffer-org)
-        (unless (derived-mode-p 'sub-buffer-org-mode) (sub-buffer-org-mode)))
-    (unless (derived-mode-p 'sub-buffer-mode) (sub-buffer-mode))))
+  (let ((queue (cl-find-if
+                (lambda (buffer)
+                  (with-current-buffer buffer
+                    (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)))
+                (buffer-list))))
+    (pop-to-buffer (or queue (get-buffer-create "*sub-buffer*")))
+    (unless queue
+      (if sub-buffer-use-org
+          (progn (require 'sub-buffer-org) (sub-buffer-org-mode))
+        (sub-buffer-mode)))))
 
 ;;;###autoload
 (defun sub-buffer-open-playlist (file)
