@@ -102,7 +102,8 @@ Use `sub-buffer-open-playlist' to open or create one."
                                     (symbol-value 'doom-localleader-key))
                (if album (list "a" #'sub-buffer-album-add)
                  (list "a" #'sub-buffer-search "p" #'sub-buffer-previous
-                       "SPC" #'sub-buffer-pause "n" #'sub-buffer-next "s" #'sub-buffer-stop
+                       "SPC" #'sub-buffer-pause "n" #'sub-buffer-next
+                       "s" #'sub-buffer-switch "S" #'sub-buffer-stop
                        "RET" #'sub-buffer-newline "d" #'sub-buffer-remove "e" #'sub-buffer-edit
                        "k" #'sub-buffer-move-up "j" #'sub-buffer-move-down
                        "o" #'sub-buffer-go-to-album "b" #'sub-buffer-add-album
@@ -817,14 +818,42 @@ is available.  Use C-h b to list active state and localleader bindings.
 
 ;;;###autoload
 (defun sub-buffer ()
-  "Return to the most recently used queue, or open one if none exists."
+  "Return to the most recently visited queue, or create one if none exists."
   (interactive)
   (let ((queue (cl-find-if
                 (lambda (buffer)
                   (with-current-buffer buffer
                     (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)))
                 (buffer-list))))
-    (if queue (pop-to-buffer queue) (sub-buffer-new))))
+    (if queue
+        (if (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)
+            (switch-to-buffer queue)
+          (pop-to-buffer queue))
+      (sub-buffer-new))))
+
+(defun sub-buffer-switch ()
+  "Choose a queue in the current window, from a queue buffer.
+Default to the playing queue, or the most recently visited queue."
+  (interactive)
+  (unless (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)
+    (user-error "Switch queues from a sub-buffer queue"))
+  (let* ((queues (cl-remove-if-not
+                  (lambda (buffer)
+                    (with-current-buffer buffer
+                      (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)))
+                  (buffer-list)))
+         (playing (cl-find-if
+                   (lambda (buffer) (buffer-local-value 'sub-buffer--current buffer))
+                   queues))
+         (completion-extra-properties
+          (list :annotation-function
+                (lambda (name)
+                  (with-current-buffer name
+                    (when sub-buffer--current
+                      (if sub-buffer--paused " [paused]" " [playing]")))))))
+    (switch-to-buffer
+     (completing-read "Queue: " (mapcar #'buffer-name queues) nil t nil nil
+                      (buffer-name (or playing (car queues)))))))
 
 ;;;###autoload
 (defun sub-buffer-new ()

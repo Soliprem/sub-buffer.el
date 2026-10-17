@@ -53,7 +53,12 @@ Emacs checks the standard authinfo files by default. If you've customized
 (add-to-list 'auth-sources "~/.authinfo.gpg")
 #+end_src
 
-Open with =M-x sub-buffer=. Use =M-x sub-buffer-new= for a fresh queue.
+Open with =M-x sub-buffer= to return to the most recently visited queue,
+or create one if none exists. Use =M-x sub-buffer-new= for a fresh queue.
+Within a queue, localleader =s= (=M-x sub-buffer-switch=) chooses another
+queue in the same window, marking playing or paused queues and defaulting
+to the playing queue (otherwise the most recently visited).
+Localleader =S= stops playback.
 
 | Key         | Action                        |
 |-------------+-------------------------------|
