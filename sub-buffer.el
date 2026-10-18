@@ -24,6 +24,7 @@
 (defvar url-http-response-status)
 (defvar url-http-end-of-headers)
 (defvar org-directory)
+(defvar org-blank-before-new-entry)
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function general-define-key "general" (&rest args))
 (declare-function org-at-item-p "org-list" ())
@@ -364,8 +365,10 @@ Unlinked characters are fine; joining different entries is ambiguous."
     (insert (propertize text 'sub-buffer-track (cons label song)
                         'rear-nonsticky '(sub-buffer-track rear-nonsticky)))))
 
-(defun sub-buffer--accept-completion (&optional context)
-  "Link an exact pending candidate from CONTEXT, returning non-nil on success."
+(defun sub-buffer--accept-completion (&optional context draft)
+  "Link an exact pending candidate from CONTEXT, returning non-nil on success.
+With DRAFT non-nil, leave point after the new draft's list prefix;
+otherwise leave it at the beginning of the first inserted track."
   (let* ((context (or context sub-buffer--completion))
          (anchor (car context))
          (label (buffer-substring-no-properties
@@ -377,7 +380,7 @@ Unlinked characters are fine; joining different entries is ambiguous."
       ;; Resolve the collection before changing any text.
       (let ((songs (sub-buffer--songs candidate)))
         (sub-buffer--insert-songs songs t)
-        (goto-char anchor)
+        (if draft (sub-buffer-newline) (goto-char anchor))
         (setq sub-buffer--completion nil)
         t))))
 
@@ -390,12 +393,12 @@ Unlinked characters are fine; joining different entries is ambiguous."
 (defun sub-buffer-newline ()
   "Accept a pending completion and start a draft, or insert a newline."
   (interactive)
-  (if (sub-buffer--accept-completion)
-      (forward-line 1)
+  (unless (sub-buffer--accept-completion nil t)
     (when (sub-buffer--entry) (end-of-line))
     (let ((start (point)))
       (if (and (derived-mode-p 'sub-buffer-org-mode) (org-at-item-p))
-          (org-insert-item (org-at-item-checkbox-p))
+          (let ((org-blank-before-new-entry '((plain-list-item . nil))))
+            (org-insert-item (org-at-item-checkbox-p)))
         (insert "\n"))
       (set-text-properties start (point) nil))))
 
@@ -436,9 +439,12 @@ Unlinked characters are fine; joining different entries is ambiguous."
     (unless (or replace (= (sub-buffer--line-start) (line-end-position)))
       (end-of-line)
       (sub-buffer-newline))
-    (dolist (candidate (sub-buffer--candidates songs))
-      (sub-buffer--insert (car candidate) (cdr candidate))
-      (sub-buffer-newline))))
+    (let ((candidates (sub-buffer--candidates songs)))
+      (while candidates
+        (sub-buffer--insert (caar candidates) (cdar candidates))
+        (setq candidates (cdr candidates))
+        (when candidates
+          (sub-buffer-newline))))))
 
 (defun sub-buffer--completion-hscroll ()
   "Suspend automatic horizontal scrolling until completion ends.
