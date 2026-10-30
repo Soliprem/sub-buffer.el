@@ -260,7 +260,7 @@
         (let ((first sub-buffer--process))
           (should (string-suffix-p "id=one" (car (last (car commands)))))
           (should (= (marker-position sub-buffer--indicator) (point-min)))
-          (should (string-match-p "0:00 / --:--" sub-buffer--status))
+          (should (string-match-p "0:00 / --:--" (sub-buffer--status)))
           ;; Move the upcoming track above the draft.
           (forward-line 2)
           (sub-buffer-move-up)
@@ -445,7 +445,7 @@
       (let ((text (buffer-string))
             (tick (buffer-chars-modified-tick)))
         (set-window-hscroll nil 40)
-        (sub-buffer--refresh)
+        (sub-buffer--update-indicator)
         (should (equal text (buffer-string)))
         (should (= tick (buffer-chars-modified-tick))))
       (should (memq 'sub-buffer--indicator overlay-arrow-variable-list))
@@ -552,7 +552,7 @@
                 (should (> sub-buffer--elapsed 0.2))
                 (should (= (round sub-buffer--duration) 3))
                 (should (= (marker-position sub-buffer--indicator) (point-min)))
-                (should (string-match-p "/ 0:03" sub-buffer--status))
+                (should (string-match-p "/ 0:03" (sub-buffer--status)))
                 (sub-buffer-pause)
                 (dotimes (_ 15) (accept-process-output nil 0.05))
                 (let ((paused-time sub-buffer--elapsed))
@@ -1015,7 +1015,7 @@
         (should-error (sub-buffer--insert-songs '(((id . "two")))) :type 'user-error)
         (should (equal text (buffer-string))))
       (let ((sub-buffer-server "https://example.test/music"))
-        (sub-buffer-org--check-server)))))
+        (sub-buffer--check-server nil)))))
 
 (ert-deftest sub-buffer-org-completion-newline ()
   "Accept with RET and start the next query after the draft's list prefix."

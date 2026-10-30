@@ -24,19 +24,14 @@
 (defvar url-http-response-status)
 (defvar url-http-end-of-headers)
 (defvar org-directory)
-(defvar org-blank-before-new-entry)
+(defvar doom-localleader-key)
+(defvar doom-localleader-alt-key)
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function general-define-key "general" (&rest args))
-(declare-function org-at-item-p "org-list" ())
-(declare-function org-at-item-checkbox-p "org-list" ())
-(declare-function org-insert-item "org-list" (&optional checkbox))
-(declare-function sub-buffer-org-mode "sub-buffer-org" ())
-(declare-function sub-buffer-org-tab "sub-buffer-org" ())
-(declare-function sub-buffer-org--entry "sub-buffer-org" ())
-(declare-function sub-buffer-org--line-start "sub-buffer-org" ())
-(declare-function sub-buffer-org--format "sub-buffer-org" (label song))
-(declare-function sub-buffer-org--edit "sub-buffer-org" ())
-(declare-function sub-buffer-org--check-server "sub-buffer-org" (&optional record))
+
+;; Manual installs don't generate autoloads, and `magic-mode-alist' below
+;; needs this before sub-buffer-org is loaded.
+(autoload 'sub-buffer-org-mode "sub-buffer-org" nil t)
 
 (defgroup sub-buffer nil "An editable Subsonic queue." :group 'multimedia)
 
@@ -68,49 +63,70 @@ Use `sub-buffer-open-playlist' to open or create one."
          (file-name-concat org-directory "playlists/")))))
 
 (defvar sub-buffer--credentials nil "Cached (SERVER USER PASSWORD).")
-(defvar-local sub-buffer--process nil)
-(defvar-local sub-buffer--current nil)
-(defvar-local sub-buffer--position nil)
-(defvar-local sub-buffer--paused nil)
-(defvar-local sub-buffer--status "Stopped")
-(defvar-local sub-buffer--ipc nil)
-(defvar-local sub-buffer--ipc-directory nil)
-(defvar-local sub-buffer--timer nil)
-(defvar-local sub-buffer--elapsed 0)
-(defvar-local sub-buffer--duration nil)
-(defvar-local sub-buffer--indicator nil)
+;; Playback state.  `sub-buffer-stop' resets everything listed in
+;; `sub-buffer--player-variables', so add new playback state there too.
+(defvar-local sub-buffer--process nil "The mpv process playing this queue.")
+(defvar-local sub-buffer--ipc nil "The connection to mpv's IPC socket.")
+(defvar-local sub-buffer--ipc-directory nil "Temporary directory holding mpv's socket.")
+(defvar-local sub-buffer--timer nil "Timer polling mpv for progress.")
+(defvar-local sub-buffer--current nil
+  "The playing entry, as returned by `sub-buffer--entry'.")
+(defvar-local sub-buffer--position nil
+  "Marker where the playing entry started, to continue after deleting it.")
+(defvar-local sub-buffer--indicator nil "Marker for the playing entry's arrow.")
+(defvar-local sub-buffer--paused nil "Non-nil when mpv is paused.")
+(defvar-local sub-buffer--elapsed 0 "Seconds played of the current track.")
+(defvar-local sub-buffer--duration nil "Length of the current track in seconds.")
+(defconst sub-buffer--player-variables
+  '(sub-buffer--process sub-buffer--ipc sub-buffer--ipc-directory sub-buffer--timer
+    sub-buffer--current sub-buffer--position sub-buffer--indicator
+    sub-buffer--paused sub-buffer--elapsed sub-buffer--duration)
+  "Playback state that `sub-buffer-stop' resets to its defaults.")
 (add-to-list 'overlay-arrow-variable-list 'sub-buffer--indicator)
 (put 'sub-buffer--indicator 'overlay-arrow-string "▶")
-(defvar-local sub-buffer--album-songs nil)
-(defvar-local sub-buffer--queue nil)
-(defvar-local sub-buffer--completion nil)
-(defvar sub-buffer--hscroll-state nil)
+
+(defvar-local sub-buffer--album-songs nil "Tracks shown in an album buffer.")
+(defvar-local sub-buffer--queue nil "The queue an album buffer adds to.")
+(defvar-local sub-buffer--completion nil
+  "Pending completion, as (ANCHOR-MARKER . CANDIDATES).")
+(defvar sub-buffer--hscroll-state nil
+  "The (BUFFER . AUTO-HSCROLL-MODE) to restore when completion ends.")
+
+(defun sub-buffer--queue-p ()
+  "Return non-nil in a queue buffer, plain or Org."
+  (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode))
+
+(defun sub-buffer--queues ()
+  "Return the queue buffers, most recently visited first."
+  (cl-remove-if-not (lambda (buffer) (with-current-buffer buffer (sub-buffer--queue-p)))
+                    (buffer-list)))
 
 (defun sub-buffer--setup-keybindings ()
-  "Use Evil and localleader when they are available in a queue buffer."
-  (when (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode 'sub-buffer-album-mode)
+  "Use Evil and localleader when they are available in a queue buffer.
+Evil bindings are buffer-local so they take precedence over minor modes
+such as evil-org, which binds < and > in Org buffers."
+  (when (or (sub-buffer--queue-p) (derived-mode-p 'sub-buffer-album-mode))
     (let ((evil (bound-and-true-p evil-local-mode))
           (album (derived-mode-p 'sub-buffer-album-mode)))
       (when (and evil (fboundp 'evil-local-set-key))
         (evil-local-set-key 'normal (kbd "RET")
                             (if album #'push-button #'sub-buffer-play))
         (unless album
+          ;; Use the mode's own TAB command, which differs in Org queues.
           (evil-local-set-key 'normal (kbd "TAB")
-                              (if (derived-mode-p 'sub-buffer-org-mode)
-                                  #'sub-buffer-org-tab #'completion-at-point))
+                              (lookup-key (current-local-map) (kbd "TAB")))
           (evil-local-set-key 'normal (kbd "K") #'sub-buffer-go-to-album)
           (evil-local-set-key 'normal (kbd "<") #'sub-buffer-seek-backward)
           (evil-local-set-key 'normal (kbd ">") #'sub-buffer-seek-forward)))
-      (when (and (boundp 'doom-localleader-key)
-                 (stringp (symbol-value 'doom-localleader-key))
+      (when (and (boundp 'doom-localleader-key) (stringp doom-localleader-key)
                  (fboundp 'general-define-key))
         (apply #'general-define-key
                :states (when evil '(normal visual motion emacs insert))
                :major-modes t :keymaps (intern (concat (symbol-name major-mode) "-map"))
-               :prefix (symbol-value 'doom-localleader-key)
+               :prefix doom-localleader-key
                :non-normal-prefix (if (boundp 'doom-localleader-alt-key)
-                                      (symbol-value 'doom-localleader-alt-key)
-                                    (symbol-value 'doom-localleader-key))
+                                      doom-localleader-alt-key
+                                    doom-localleader-key)
                (if album (list "a" #'sub-buffer-album-add)
                  (list "a" #'sub-buffer-search "p" #'sub-buffer-previous
                        "SPC" #'sub-buffer-pause "n" #'sub-buffer-next
@@ -120,24 +136,31 @@ Use `sub-buffer-open-playlist' to open or create one."
                        "o" #'sub-buffer-go-to-album "b" #'sub-buffer-add-album
                        "l" #'sub-buffer-add-playlist "N" #'sub-buffer-new)))))))
 
+;; Global `evil-mode' turns Evil on only after the major mode has started.
 (with-eval-after-load 'evil
   (add-hook 'evil-local-mode-hook #'sub-buffer--setup-keybindings))
 
-(defun sub-buffer--url (endpoint &optional parameters)
-  "Build an authenticated URL for ENDPOINT with PARAMETERS."
-  (unless (stringp sub-buffer-server)
+(defun sub-buffer--server ()
+  "Return `sub-buffer-server' without trailing slashes, after validating it."
+  (unless (and (stringp sub-buffer-server) (not (string-empty-p sub-buffer-server)))
     (user-error "Set sub-buffer-server first"))
-  (let* ((server (url-generic-parse-url sub-buffer-server))
-         (host (url-host server)))
-    (unless (and (member (url-type server) '("http" "https")) host
+  (let ((server (url-generic-parse-url sub-buffer-server)))
+    (unless (and (member (url-type server) '("http" "https")) (url-host server)
                  (not (url-user server)) (not (url-target server))
                  (not (string-match-p "[?]" (url-filename server))))
-      (user-error "Use an HTTP(S) base URL without credentials or a query"))
+      (user-error "Use an HTTP(S) base URL without credentials or a query")))
+  (string-trim-right sub-buffer-server "/+"))
+
+(defun sub-buffer--login ()
+  "Return (SERVER USER PASSWORD), looking them up in auth-source if needed.
+The result is cached in `sub-buffer--credentials' until the server or
+`sub-buffer-user' changes."
+  (let ((server (sub-buffer--server)))
     (unless (and (equal sub-buffer-server (car sub-buffer--credentials))
                  (or (null sub-buffer-user)
                      (equal sub-buffer-user (cadr sub-buffer--credentials))))
       (let* ((matches (auth-source-search
-                       :host (list host (string-trim-right sub-buffer-server "/+"))
+                       :host (list (url-host (url-generic-parse-url server)) server)
                        :user (or sub-buffer-user t)
                        :require '(:user :secret)
                        :max (if sub-buffer-user 1 most-positive-fixnum)))
@@ -154,19 +177,23 @@ Use `sub-buffer-open-playlist' to open or create one."
               (list sub-buffer-server user
                     (or (if (functionp secret) (funcall secret) secret)
                         (read-passwd "Subsonic password: "))))))
-    (let* ((salt (md5 (format "%s:%s:%s" (current-time) (random) (emacs-pid))))
-           (token (md5 (encode-coding-string
-                        (concat (nth 2 sub-buffer--credentials) salt) 'utf-8)))
-           (params (append `(("u" . ,(cadr sub-buffer--credentials)) ("t" . ,token)
-                             ("s" . ,salt) ("v" . "1.16.1")
-                             ("c" . "sub-buffer") ("f" . "json"))
-                           parameters)))
-      (concat (string-trim-right sub-buffer-server "/+") "/rest/" endpoint
-              "?" (mapconcat
-                    (lambda (pair)
-                      (concat (url-hexify-string (car pair)) "="
-                              (url-hexify-string (cdr pair))))
-                    params "&")))))
+    sub-buffer--credentials))
+
+(defun sub-buffer--url (endpoint &optional parameters)
+  "Build an authenticated URL for ENDPOINT with PARAMETERS."
+  (pcase-let* ((`(,_ ,user ,password) (sub-buffer--login))
+               (salt (md5 (format "%s:%s:%s" (current-time) (random) (emacs-pid))))
+               (token (md5 (encode-coding-string (concat password salt) 'utf-8)))
+               (params (append `(("u" . ,user) ("t" . ,token)
+                                 ("s" . ,salt) ("v" . "1.16.1")
+                                 ("c" . "sub-buffer") ("f" . "json"))
+                               parameters)))
+    (concat (sub-buffer--server) "/rest/" endpoint
+            "?" (mapconcat
+                  (lambda (pair)
+                    (concat (url-hexify-string (car pair)) "="
+                            (url-hexify-string (cdr pair))))
+                  params "&"))))
 
 ;;;###autoload
 (defun sub-buffer-switch-login ()
@@ -174,8 +201,7 @@ Use `sub-buffer-open-playlist' to open or create one."
 Override `sub-buffer-user' for this session.  Canceling keeps the current login."
   (interactive)
   (let ((credentials (let ((sub-buffer-user nil) (sub-buffer--credentials nil))
-                       (sub-buffer--url "ping")
-                       sub-buffer--credentials)))
+                       (sub-buffer--login))))
     (setq sub-buffer-user (cadr credentials)
           sub-buffer--credentials credentials)
     (message "Sub-buffer login: %s" sub-buffer-user)))
@@ -309,26 +335,43 @@ Override `sub-buffer-user' for this session.  Canceling keeps the current login.
        (sub-buffer--songs album)))
     (_ (list item))))
 
-(defun sub-buffer--entry ()
+;; A queue line holds at most one entry, (LABEL . SONG).  Plain queues
+;; keep it in a text property; sub-buffer-org.el adds Org link methods.
+
+(cl-defgeneric sub-buffer--entry ()
   "Return the unique track reference on this line, regardless of its label.
 Unlinked characters are fine; joining different entries is ambiguous."
-  (if (derived-mode-p 'sub-buffer-org-mode)
-      (sub-buffer-org--entry)
-    (let ((position (line-beginning-position)) (end (line-end-position))
-          entry conflict)
-      (while (< position end)
-        (when-let* ((reference (get-text-property position 'sub-buffer-track)))
-          (if (and entry (not (eq entry reference)))
-              (setq conflict t)
-            (setq entry reference)))
-        (setq position (next-single-property-change position 'sub-buffer-track nil end)))
-      (unless conflict entry))))
+  (let ((position (line-beginning-position)) (end (line-end-position))
+        entry conflict)
+    (while (< position end)
+      (when-let* ((reference (get-text-property position 'sub-buffer-track)))
+        (if (and entry (not (eq entry reference)))
+            (setq conflict t)
+          (setq entry reference)))
+      (setq position (next-single-property-change position 'sub-buffer-track nil end)))
+    (unless conflict entry)))
 
-(defun sub-buffer--line-start ()
-  "Return the beginning of this line's query, after any Org list prefix."
-  (if (derived-mode-p 'sub-buffer-org-mode)
-      (sub-buffer-org--line-start)
-    (line-beginning-position)))
+(cl-defgeneric sub-buffer--line-start ()
+  "Return the beginning of this line's query, after any list prefix."
+  (line-beginning-position))
+
+(cl-defgeneric sub-buffer--format (label _song)
+  "Return the queue text for a line holding SONG, labeled LABEL."
+  label)
+
+(cl-defgeneric sub-buffer--line-break ()
+  "Insert a line break at point for a new draft line."
+  (insert "\n"))
+
+(cl-defgeneric sub-buffer--detach ()
+  "Remove this line's track reference, leaving its label as a query."
+  (remove-text-properties (line-beginning-position) (line-end-position)
+                          '(sub-buffer-track nil)))
+
+(cl-defgeneric sub-buffer--check-server (_record)
+  "Signal an error if this queue belongs to another server.
+With RECORD non-nil, record the configured server if the queue has none."
+  nil)
 
 (defun sub-buffer--help-echo (window object position)
   "Show the full line at POSITION in OBJECT or WINDOW when hovering."
@@ -357,9 +400,7 @@ Unlinked characters are fine; joining different entries is ambiguous."
 (defun sub-buffer--insert (label song)
   "Replace this line with LABEL, retaining SONG as a text property."
   (let ((start (line-beginning-position))
-        (text (if (derived-mode-p 'sub-buffer-org-mode)
-                  (sub-buffer-org--format label song)
-                label)))
+        (text (sub-buffer--format label song)))
     (delete-region start (line-end-position))
     (goto-char start)
     (insert (propertize text 'sub-buffer-track (cons label song)
@@ -380,7 +421,9 @@ otherwise leave it at the beginning of the first inserted track."
       ;; Resolve the collection before changing any text.
       (let ((songs (sub-buffer--songs candidate)))
         (sub-buffer--insert-songs songs t)
-        (if draft (sub-buffer-newline) (goto-char anchor))
+        (if draft
+            (progn (end-of-line) (sub-buffer--open-line))
+          (goto-char anchor))
         (setq sub-buffer--completion nil)
         t))))
 
@@ -390,17 +433,18 @@ otherwise leave it at the beginning of the first inserted track."
   (unless (or (sub-buffer--entry) (sub-buffer--accept-completion))
     (user-error "Choose a completion candidate first")))
 
+(defun sub-buffer--open-line ()
+  "Insert a line break at point, without carrying a track reference over."
+  (let ((start (point)))
+    (sub-buffer--line-break)
+    (set-text-properties start (point) nil)))
+
 (defun sub-buffer-newline ()
   "Accept a pending completion and start a draft, or insert a newline."
   (interactive)
   (unless (sub-buffer--accept-completion nil t)
     (when (sub-buffer--entry) (end-of-line))
-    (let ((start (point)))
-      (if (and (derived-mode-p 'sub-buffer-org-mode) (org-at-item-p))
-          (let ((org-blank-before-new-entry '((plain-list-item . nil))))
-            (org-insert-item (org-at-item-checkbox-p)))
-        (insert "\n"))
-      (set-text-properties start (point) nil))))
+    (sub-buffer--open-line)))
 
 (defun sub-buffer-remove ()
   "Kill the whole current line."
@@ -410,10 +454,7 @@ otherwise leave it at the beginning of the first inserted track."
 (defun sub-buffer-edit ()
   "Detach this line's track reference to search for another recording."
   (interactive)
-  (if (derived-mode-p 'sub-buffer-org-mode)
-      (sub-buffer-org--edit)
-    (remove-text-properties (line-beginning-position) (line-end-position)
-                            '(sub-buffer-track nil))))
+  (sub-buffer--detach))
 
 (defun sub-buffer-move-up ()
   "Move this line up, retaining its track reference."
@@ -434,25 +475,21 @@ otherwise leave it at the beginning of the first inserted track."
   "Insert SONGS after this line, or replace this line when REPLACE is non-nil."
   (unless songs (user-error "This album or playlist has no tracks"))
   (atomic-change-group
-    (when (derived-mode-p 'sub-buffer-org-mode)
-      (sub-buffer-org--check-server t))
+    (sub-buffer--check-server t)
     (unless (or replace (= (sub-buffer--line-start) (line-end-position)))
       (end-of-line)
-      (sub-buffer-newline))
-    (let ((candidates (sub-buffer--candidates songs)))
-      (while candidates
-        (sub-buffer--insert (caar candidates) (cdar candidates))
-        (setq candidates (cdr candidates))
-        (when candidates
-          (sub-buffer-newline))))))
+      (sub-buffer--open-line))
+    (let ((first t))
+      (pcase-dolist (`(,label . ,song) (sub-buffer--candidates songs))
+        (if first (setq first nil) (sub-buffer--open-line))
+        (sub-buffer--insert label song)))))
 
 (defun sub-buffer--completion-hscroll ()
   "Suspend automatic horizontal scrolling until completion ends.
 Necessary for corfu-like completors, which break with auto hscroll"
   ;; Completion mode is global and can end from a different buffer.
   (cond
-   ((and completion-in-region-mode (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)
-         (not sub-buffer--hscroll-state))
+   ((and completion-in-region-mode (sub-buffer--queue-p) (not sub-buffer--hscroll-state))
     (setq sub-buffer--hscroll-state (cons (current-buffer) auto-hscroll-mode))
     (setq-local auto-hscroll-mode nil))
    ((and (not completion-in-region-mode) sub-buffer--hscroll-state)
@@ -514,10 +551,11 @@ Necessary for corfu-like completors, which break with auto hscroll"
 
 (defun sub-buffer--album-at-point ()
   "Return the album of the track at point."
-  (when (derived-mode-p 'sub-buffer-org-mode) (sub-buffer-org--check-server))
+  (sub-buffer--check-server nil)
   (let* ((entry (sub-buffer--entry))
+         ;; Entries read back from a saved playlist hold only the track ID.
          (id (or (alist-get 'albumId (cdr entry))
-                 (when (and entry (derived-mode-p 'sub-buffer-org-mode))
+                 (when entry
                    (alist-get 'albumId
                               (alist-get 'song
                                          (sub-buffer--request
@@ -589,14 +627,19 @@ Necessary for corfu-like completors, which break with auto hscroll"
       (format-seconds "%m:%02s" (max 0 (truncate seconds)))
     "--:--"))
 
-(defun sub-buffer--refresh (&rest _)
-  "Refresh the playing entry's arrow and mode line."
+(defun sub-buffer--status ()
+  "Describe playback for the mode line."
+  (if sub-buffer--current
+      (format "%s %s / %s: %s" (if sub-buffer--paused "Paused" "Playing")
+              (sub-buffer--time sub-buffer--elapsed)
+              (sub-buffer--time sub-buffer--duration)
+              (truncate-string-to-width (car sub-buffer--current) 40 nil nil "…"))
+    "Stopped"))
+
+(defun sub-buffer--update-indicator (&rest _)
+  "Move the arrow to the playing entry, which edits may have moved.
+This scans the queue, so it runs after edits rather than on every poll."
   (when sub-buffer--current
-    (setq sub-buffer--status
-          (format "%s %s / %s: %s" (if sub-buffer--paused "Paused" "Playing")
-                  (sub-buffer--time sub-buffer--elapsed)
-                  (sub-buffer--time sub-buffer--duration)
-                  (truncate-string-to-width (car sub-buffer--current) 40 nil nil "…")))
     (unless sub-buffer--indicator
       (setq sub-buffer--indicator (make-marker)))
     (set-marker sub-buffer--indicator (sub-buffer--current-line))
@@ -628,12 +671,13 @@ Necessary for corfu-like completors, which break with auto hscroll"
                                                   :null-object nil :false-object :false)
                              (error nil))))
                 (when (equal (alist-get 'error reply) "success")
+                  ;; Request IDs are assigned in `sub-buffer--poll'.
                   (let ((data (alist-get 'data reply)))
                     (pcase (alist-get 'request_id reply)
                       (1 (when (numberp data) (setq sub-buffer--elapsed data)))
                       (2 (when (numberp data) (setq sub-buffer--duration data)))
                       (3 (setq sub-buffer--paused (eq data t)))))
-                  (sub-buffer--refresh))))))))
+                  (force-mode-line-update))))))))
     (process-put process 'pending pending)))
 
 (defun sub-buffer--poll (origin)
@@ -668,17 +712,13 @@ Necessary for corfu-like completors, which break with auto hscroll"
       (delete-process sub-buffer--process)))
   (when sub-buffer--ipc-directory (delete-directory sub-buffer--ipc-directory t))
   (when sub-buffer--position (set-marker sub-buffer--position nil))
-  (setq sub-buffer--process nil sub-buffer--current nil
-        sub-buffer--position nil sub-buffer--paused nil
-        sub-buffer--ipc nil sub-buffer--ipc-directory nil sub-buffer--timer nil
-        sub-buffer--elapsed 0 sub-buffer--duration nil sub-buffer--indicator nil
-        sub-buffer--status "Stopped")
+  (mapc #'kill-local-variable sub-buffer--player-variables)
   (force-mode-line-update))
 
 (defun sub-buffer-play ()
   "Play the completed track on this line."
   (interactive)
-  (when (derived-mode-p 'sub-buffer-org-mode) (sub-buffer-org--check-server))
+  (sub-buffer--check-server nil)
   (unless (sub-buffer--entry) (sub-buffer--accept-completion))
   (let ((entry (sub-buffer--entry))
         (mpv (executable-find "mpv")))
@@ -716,7 +756,7 @@ Necessary for corfu-like completors, which break with auto hscroll"
             sub-buffer--position (copy-marker (line-beginning-position) t)
             sub-buffer--duration (alist-get 'duration (cdr entry))
             sub-buffer--timer (run-at-time 0.1 0.5 #'sub-buffer--poll origin))
-      (sub-buffer--refresh))))
+      (sub-buffer--update-indicator))))
 
 (defun sub-buffer-next ()
   "Play the next completed line, following the buffer's current order."
@@ -744,22 +784,24 @@ Necessary for corfu-like completors, which break with auto hscroll"
     (unless (sub-buffer--entry) (user-error "No previous track"))
     (sub-buffer-play)))
 
+(defun sub-buffer--connect ()
+  "Connect to the playing mpv, or signal that it can't take commands yet."
+  (unless (process-live-p sub-buffer--process) (user-error "Nothing is playing"))
+  (sub-buffer--poll (current-buffer))
+  (unless (process-live-p sub-buffer--ipc) (user-error "Player is still starting; try again")))
+
 (defun sub-buffer-pause ()
   "Toggle mpv's pause state."
   (interactive)
-  (unless (process-live-p sub-buffer--process) (user-error "Nothing is playing"))
-  (sub-buffer--poll (current-buffer))
-  (unless (process-live-p sub-buffer--ipc) (user-error "Player is still starting; try again"))
+  (sub-buffer--connect)
   (sub-buffer--ipc-send (list "set_property" "pause" (if sub-buffer--paused :false t)))
   (setq sub-buffer--paused (not sub-buffer--paused))
-  (sub-buffer--refresh))
+  (force-mode-line-update))
 
 (defun sub-buffer-seek (seconds)
   "Seek SECONDS relative to the current playback position."
   (interactive "nSeek seconds (negative for backward): ")
-  (unless (process-live-p sub-buffer--process) (user-error "Nothing is playing"))
-  (sub-buffer--poll (current-buffer))
-  (unless (process-live-p sub-buffer--ipc) (user-error "Player is still starting; try again"))
+  (sub-buffer--connect)
   (sub-buffer--ipc-send (list "seek" seconds "relative+exact")))
 
 (defun sub-buffer-seek-forward ()
@@ -772,8 +814,8 @@ Necessary for corfu-like completors, which break with auto hscroll"
   (interactive)
   (sub-buffer-seek -10))
 
-(defvar sub-buffer-mode-map (make-sparse-keymap))
-(let ((map sub-buffer-mode-map))
+(defvar sub-buffer-mode-map
+  (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'completion-at-point)
     (define-key map (kbd "RET") #'sub-buffer-newline)
     (define-key map (kbd "C-c RET") #'sub-buffer-accept)
@@ -792,7 +834,7 @@ Necessary for corfu-like completors, which break with auto hscroll"
     (define-key map (kbd "C-c C-b") #'sub-buffer-add-album)
     (define-key map (kbd "C-c C-o") #'sub-buffer-go-to-album)
     (define-key map (kbd "C-c C-l") #'sub-buffer-add-playlist)
-    map)
+    map))
 
 (define-derived-mode sub-buffer-mode fundamental-mode "sub-buffer"
   "Edit a music queue.  Type a query and press TAB to insert a track.
@@ -823,26 +865,21 @@ is available.  Use C-h b to list active state and localleader bindings.
   (setq-local completion-category-overrides
               (cons '(sub-buffer-track (styles sub-buffer))
                     completion-category-overrides))
-  (setq-local mode-line-process '(:eval (list " [" sub-buffer--status "]")))
+  (setq-local mode-line-process '(:eval (list " [" (sub-buffer--status) "]")))
   (setq-local header-line-format nil)
   ;; Refresh after the major mode has updated its parse caches.
-  (add-hook 'after-change-functions #'sub-buffer--refresh t t)
+  (add-hook 'after-change-functions #'sub-buffer--update-indicator t t)
   (add-hook 'kill-buffer-hook #'sub-buffer-stop nil t)
-  (add-hook 'change-major-mode-hook #'sub-buffer-stop nil t))
-
-(add-hook 'sub-buffer-mode-hook #'sub-buffer--setup-keybindings)
+  (add-hook 'change-major-mode-hook #'sub-buffer-stop nil t)
+  (sub-buffer--setup-keybindings))
 
 ;;;###autoload
 (defun sub-buffer ()
   "Return to the most recently visited queue, or create one if none exists."
   (interactive)
-  (let ((queue (cl-find-if
-                (lambda (buffer)
-                  (with-current-buffer buffer
-                    (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)))
-                (buffer-list))))
+  (let ((queue (car (sub-buffer--queues))))
     (if queue
-        (if (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)
+        (if (sub-buffer--queue-p)
             (switch-to-buffer queue)
           (pop-to-buffer queue))
       (sub-buffer-new))))
@@ -851,13 +888,9 @@ is available.  Use C-h b to list active state and localleader bindings.
   "Choose a queue in the current window, from a queue buffer.
 Default to the playing queue, or the most recently visited queue."
   (interactive)
-  (unless (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)
+  (unless (sub-buffer--queue-p)
     (user-error "Switch queues from a sub-buffer queue"))
-  (let* ((queues (cl-remove-if-not
-                  (lambda (buffer)
-                    (with-current-buffer buffer
-                      (derived-mode-p 'sub-buffer-mode 'sub-buffer-org-mode)))
-                  (buffer-list)))
+  (let* ((queues (sub-buffer--queues))
          (playing (cl-find-if
                    (lambda (buffer) (buffer-local-value 'sub-buffer--current buffer))
                    queues))
@@ -898,7 +931,6 @@ Default to the playing queue, or the most recently visited queue."
        (string-suffix-p ".org" buffer-file-name)
        (file-in-directory-p buffer-file-name (sub-buffer--playlist-directory))))
 
-(autoload 'sub-buffer-org-mode "sub-buffer-org" nil t)
 (add-to-list 'magic-mode-alist '(sub-buffer--playlist-p . sub-buffer-org-mode))
 
 (provide 'sub-buffer)

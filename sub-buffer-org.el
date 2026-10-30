@@ -14,7 +14,9 @@
 (require 'org)
 (require 'org-element)
 
-(defun sub-buffer-org--line-start ()
+;; These methods implement the queue format generics in sub-buffer.el.
+
+(cl-defmethod sub-buffer--line-start (&context (major-mode sub-buffer-org-mode))
   "Return the beginning of this line's text after its Org list prefix."
   (save-excursion
     (beginning-of-line)
@@ -24,21 +26,24 @@
         (goto-char (match-end 0))))
     (point)))
 
-(defun sub-buffer-org--format (label song)
+(cl-defmethod sub-buffer--format (label song &context (major-mode sub-buffer-org-mode))
   "Format LABEL and SONG as an Org link, keeping the current list prefix."
   (let ((prefix (buffer-substring-no-properties
-                 (line-beginning-position) (sub-buffer-org--line-start))))
+                 (line-beginning-position) (sub-buffer--line-start))))
     (concat (if (string-empty-p prefix) "- " prefix)
             (org-link-make-string
              (concat "sub-buffer:" (url-hexify-string (alist-get 'id song))) label))))
 
-(defun sub-buffer-org--entry ()
+(cl-defmethod sub-buffer--entry (&context (major-mode sub-buffer-org-mode))
   "Read this line's unique track link, caching metadata only in text properties.
-The saved link is authoritative; changing its ID invalidates cached metadata."
+The saved link is authoritative; changing its ID invalidates cached metadata.
+The cached entry is returned itself, so callers can compare entries with
+`eq'; only its label is updated in place."
   (save-excursion
     (beginning-of-line)
     (let ((end (line-end-position)) entry conflict)
       (while (re-search-forward org-link-bracket-re end t)
+        ;; The regexp also matches inside comments and source blocks.
         (let* ((begin (match-beginning 0)) (finish (match-end 0))
                (link (save-excursion (goto-char begin) (org-element-context))))
           (when (and (eq (org-element-type link) 'link)
@@ -63,35 +68,40 @@ The saved link is authoritative; changing its ID invalidates cached metadata."
           (goto-char finish)))
       (unless conflict entry))))
 
-(defun sub-buffer-org--edit ()
+(cl-defmethod sub-buffer--detach (&context (major-mode sub-buffer-org-mode))
   "Replace this track link with its readable description for a fresh search."
-  (when-let* ((entry (sub-buffer-org--entry)))
+  (when-let* ((entry (sub-buffer--entry)))
     (atomic-change-group
-      (let ((start (sub-buffer-org--line-start)))
+      (let ((start (sub-buffer--line-start)))
         (delete-region start (line-end-position))
         (goto-char start)
         (insert (substring-no-properties (car entry))))
       (remove-text-properties (line-beginning-position) (line-end-position)
                               '(sub-buffer-track nil)))))
 
-(defun sub-buffer-org--check-server (&optional record)
+(cl-defmethod sub-buffer--line-break (&context (major-mode sub-buffer-org-mode))
+  "Continue the Org list at point with a new, adjacent item."
+  (if (org-at-item-p)
+      (let ((org-blank-before-new-entry '((plain-list-item . nil))))
+        (org-insert-item (org-at-item-checkbox-p)))
+    (cl-call-next-method)))
+
+(cl-defmethod sub-buffer--check-server (record &context (major-mode sub-buffer-org-mode))
   "Reject a missing or mismatched playlist server.
 When RECORD is non-nil, record the configured server if the header is missing."
-  (unless (and (stringp sub-buffer-server) (not (string-empty-p sub-buffer-server)))
-    (user-error "Set sub-buffer-server first"))
-  (save-restriction
-    (widen)
-    (let ((servers (cdr (assoc "SUB_BUFFER_SERVER"
-                               (org-collect-keywords '("SUB_BUFFER_SERVER"))))))
-      (unless servers
-        (unless record (user-error "Playlist has no SUB_BUFFER_SERVER header"))
-        (save-excursion
-          (goto-char (point-min))
-          (insert-before-markers "#+SUB_BUFFER_SERVER: " sub-buffer-server "\n")))
-      (dolist (server servers)
-        (unless (equal (string-trim-right server "/+")
-                       (string-trim-right sub-buffer-server "/+"))
-          (user-error "Playlist belongs to %s; set sub-buffer-server first" server))))))
+  (let ((configured (sub-buffer--server)))
+    (save-restriction
+      (widen)
+      (let ((servers (cdr (assoc "SUB_BUFFER_SERVER"
+                                 (org-collect-keywords '("SUB_BUFFER_SERVER"))))))
+        (unless servers
+          (unless record (user-error "Playlist has no SUB_BUFFER_SERVER header"))
+          (save-excursion
+            (goto-char (point-min))
+            (insert-before-markers "#+SUB_BUFFER_SERVER: " sub-buffer-server "\n")))
+        (dolist (server servers)
+          (unless (equal (string-trim-right server "/+") configured)
+            (user-error "Playlist belongs to %s; set sub-buffer-server first" server)))))))
 
 (defun sub-buffer-org--follow (_path _argument)
   "Play the track link at point in this playlist."
@@ -133,8 +143,7 @@ a track link, and M-up/M-down reorder Org items.
   (unless buffer-file-name
     (let ((directory (sub-buffer--playlist-directory)))
       (make-directory directory t)
-      (setq-local default-directory (file-name-as-directory directory))))
-  (sub-buffer--setup-keybindings))
+      (setq-local default-directory (file-name-as-directory directory)))))
 
 (org-link-set-parameters "sub-buffer" :follow #'sub-buffer-org--follow)
 
